@@ -1,0 +1,47 @@
+---
+name: wheel-failure-triage
+description: >-
+  Deterministically collect Fromager wheel failures across GitLab pipeline
+  descendants, create one audit child job, and hand the report to PFA.
+allowed-tools: Bash Read
+metadata:
+  author: ODH
+  version: "1.0"
+  tags: pipeline, wheels, failure-analysis, ci
+---
+
+# Wheel Failure Triage
+
+Use the bundled CLI to inventory wheel build failures and prepare a single audit child pipeline. Keep collection and notification deterministic; PFA handles later analysis and reporting. Do not group failures with an LLM or create a child job per package or failure group.
+
+## Commands
+
+Run the collector from the pipeline workspace:
+
+```bash
+python3 "${CLAUDE_SKILL_DIR}/scripts/wheel_failure_triage.py" prepare --work-dir .wheel-triage
+```
+
+For offline runs, pass a normalized JSON file with `--failures <path>`. The report-level `pipeline_url` remains the origin pipeline. Each failure retains its `source_pipeline_url`, which identifies the pipeline that produced it.
+
+The collector writes `.wheel-triage/failures.json`, `.wheel-triage/audit.yml`, and a copy of `wheel_failure_triage.py`. The generated child has one audit job and runs:
+
+```bash
+python3 .wheel-triage/wheel_failure_triage.py audit .wheel-triage/failures.json
+```
+
+The audit command uses only the Python standard library, prints every occurrence, and exits nonzero when the report contains failures. It can run directly from the collector artifact without cloning this repository or installing helper dependencies.
+
+After the audit bridge reaches a terminal state, the CI notification job invokes:
+
+```bash
+python3 "${CLAUDE_SKILL_DIR}/scripts/wheel_failure_triage.py" notify --work-dir .wheel-triage
+```
+
+The CLI starts the PFA pipeline using `BOT_PAT`, forwards the selected pipeline URL and Jira/Slack configuration, and honors `PFA_DISABLE_NOTIFICATIONS=true` or an empty `JIRA_API_TOKEN` for temporary notification suppression.
+
+## Runtime requirements
+
+`prepare` and `notify` require Python packages `requests` and `PyYAML`. Both require `CI_API_V4_URL`, `CI_PROJECT_ID`, and `BOT_PAT`. `prepare` also requires `CI_PIPELINE_ID` and `CI_PIPELINE_URL`; `CI_JOB_ID` is used to identify a collection error. `notify` uses `CI_COMMIT_REF_NAME` and the CI pipeline metadata. Jira and Slack values are optional and may be supplied through `JIRA_PROJECT`, `JIRA_LABELS`, `JIRA_COMPONENTS`, `JIRA_SUMMARY_PREFIX`, `JIRA_API_TOKEN`, and `SLACK_WEBHOOK_URL`.
+
+Collection walks upstream root and build child pipelines through GitLab bridge jobs, uses latest job attempts, and checks successful bootstrap reports as well as failed ones. It follows a shared descendant once, excludes the audit and notification flow, and routes artifact requests by the producing job's project ID. If a downstream project cannot be determined, retain the explicit evidence error rather than attributing its artifacts to the root project.
