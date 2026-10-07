@@ -188,10 +188,10 @@ def producer_records(
             return []
         data: Any = json.loads(raw)
         if not isinstance(data, dict):
-            raise ValueError("Failure report must be an object")
+            raise TypeError("Failure report must be an object")
         failures: Any = data.get("failures")
         if not isinstance(failures, list):
-            raise ValueError("Failure report must contain a failures array")
+            raise TypeError("Failure report must contain a failures array")
         result: list[dict[str, Any]] = []
         for index, failure in enumerate(failures):
             try:
@@ -207,7 +207,7 @@ def producer_records(
                 entry["diagnostics"] = json.dumps(failure)
                 result.append(entry)
         return result
-    except (ValueError, UnicodeError) as exc:
+    except (TypeError, ValueError, UnicodeError) as exc:
         evidence: dict[str, Any] = record(
             job, "evidence", "evidence", str(exc), source_pipeline_url
         )
@@ -472,7 +472,7 @@ def collect(
                             source_pipeline_url,
                         )
                     ]
-                except (ValueError, UnicodeError) as exc:
+                except (TypeError, ValueError, UnicodeError) as exc:
                     entries = [
                         record(
                             job,

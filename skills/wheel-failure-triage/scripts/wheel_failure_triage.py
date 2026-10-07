@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Collect wheel failures, emit one audit report, and invoke PFA."""
 
 import argparse
