@@ -30,7 +30,9 @@ The collector writes `.wheel-triage/failures.json`, `.wheel-triage/audit.yml`, a
 python3 .wheel-triage/wheel_failure_triage.py audit .wheel-triage/failures.json
 ```
 
-The audit command uses only the Python standard library, prints every occurrence, and exits nonzero when the report contains failures. It can run directly from the collector artifact without cloning this repository or installing helper dependencies.
+The audit command uses only the Python standard library, prints aggregate counts, and exits nonzero when the report contains failures. It keeps failure messages, URLs, and arbitrary payload fields out of the CI log; PFA reads the complete JSON artifact. Restrict collector and audit artifact access to the authorized CI/PFA readers because the JSON contains unredacted evidence. The audit runs directly from the collector artifact without cloning this repository or installing helper dependencies.
+
+`--work-dir` must be relative to the project workspace and cannot contain `..` or resolve outside it. Generated script and report paths follow that directory, including paths with spaces. Keep the default `.wheel-triage` for the current PFA artifact-reader contract; other directories require the consumer to read the corresponding report path. The audit image is pinned to an immutable UBI Python 3.12 manifest digest.
 
 After the audit bridge reaches a terminal state, the CI notification job invokes:
 

@@ -2,6 +2,7 @@
 
 import json
 import re
+import shlex
 import shutil
 import time
 from pathlib import Path
@@ -16,10 +17,15 @@ FAILURES_PATH: str = "mnt/work-dir/partial-failures.json"
 BUILD_ORDER_PATH: str = "mnt/work-dir/build-order.json"
 TERMINAL: frozenset[str] = frozenset({"success", "failed", "canceled", "skipped"})
 AUDIT_JOB: str = "wheel-failure-audit"
+AUDIT_IMAGE: str = (
+    "registry.access.redhat.com/ubi9/python-312@"
+    "sha256:56fad467cb1e41666f0028b7fd71107df0556bcc9ecfc577597858c85618f55c"
+)
 LAUNCH_JOB: str = "launch-wheel-audit"
-REPORT_PATH: str = ".wheel-triage/failures.json"
 TRIAGE_JOB: str = "collect-wheel-failures"
-AUDIT_FLOW_JOBS: frozenset[str] = frozenset({AUDIT_JOB, LAUNCH_JOB, "analyze-failures"})
+AUDIT_FLOW_JOBS: frozenset[str] = frozenset(
+    {AUDIT_JOB, LAUNCH_JOB, TRIAGE_JOB, "analyze-failures"}
+)
 
 
 def write_json(path: Path, data: Any) -> None:
@@ -334,6 +340,7 @@ def collect(
     require_producers: bool = True,
     root_project_id: int | str | None = None,
     root_pipeline_url: str | None = None,
+    current_job_id: int | str | None = None,
 ) -> list[dict[str, Any]]:
     root_project: int | str = root_project_id or client.project_id
     root_url: str = root_pipeline_url or ""
@@ -412,20 +419,23 @@ def collect(
 
         for job in jobs:
             job["project_id"] = project_id
+            if current_job_id is not None and str(job.get("id")) == str(current_job_id):
+                continue
             if job.get("stage") in {"wheel-triage", "notify"}:
                 continue
             if job.get("name") in AUDIT_FLOW_JOBS:
                 continue
             if job["status"] not in TERMINAL and job["status"] != "manual":
-                failures.append(
-                    record(
-                        job,
-                        "completion",
-                        "evidence",
-                        f"Producer {job['id']} has not finished",
-                        source_pipeline_url,
+                if job.get("stage") == "bootstrap":
+                    failures.append(
+                        record(
+                            job,
+                            "completion",
+                            "evidence",
+                            f"Producer {job['id']} has not finished",
+                            source_pipeline_url,
+                        )
                     )
-                )
                 continue
             entries: list[dict[str, Any]] = []
             # Build jobs inherit bootstrap reports and telemetry. Reading only
@@ -586,6 +596,31 @@ def collect(
 def prepare(
     work_dir: Path, environ: dict[str, str], failures_file: Path | None = None
 ) -> None:
+    project_root: Path = Path.cwd().resolve()
+    if work_dir.is_absolute() or ".." in work_dir.parts:
+        raise ValueError(
+            "Work directory must be project-relative and cannot contain '..'"
+        )
+    try:
+        work_dir.resolve().relative_to(project_root)
+    except ValueError as exc:
+        raise ValueError(
+            "Work directory must stay within the project workspace"
+        ) from exc
+
+    report_file: Path = work_dir.joinpath("failures.json")
+    cli_file: Path = work_dir.joinpath("wheel_failure_triage.py")
+    config_file: Path = work_dir.joinpath("audit.yml")
+    for output_path in (report_file, cli_file, config_file):
+        try:
+            output_path.resolve().relative_to(project_root)
+        except ValueError as exc:
+            raise ValueError(
+                "Generated paths must stay within the project workspace"
+            ) from exc
+    report_path: str = report_file.as_posix()
+    cli_path: str = cli_file.as_posix()
+
     if failures_file:
         failures: list[dict[str, Any]] = read_json(failures_file)["failures"]
     else:
@@ -596,6 +631,7 @@ def prepare(
                 require_producers=environ.get("CI_PIPELINE_SOURCE") == "schedule",
                 root_project_id=environ["CI_PROJECT_ID"],
                 root_pipeline_url=environ["CI_PIPELINE_URL"],
+                current_job_id=environ.get("CI_JOB_ID"),
             )
         except (requests.RequestException, ValueError, KeyError) as exc:
             failures = [
@@ -631,7 +667,7 @@ def prepare(
                 seen_logs.add(key)
         records.append(entry)
     write_json(
-        work_dir.joinpath("failures.json"),
+        report_file,
         {
             "pipeline_url": environ["CI_PIPELINE_URL"],
             "failures": records,
@@ -645,7 +681,7 @@ def prepare(
         "stages": ["audit"],
         AUDIT_JOB: {
             "stage": "audit",
-            "image": "registry.access.redhat.com/ubi9/python-312:latest",
+            "image": AUDIT_IMAGE,
             "tags": ["aipcc-small-x86_64"],
             "rules": [{"if": '$CI_PIPELINE_SOURCE == "parent_pipeline"'}],
             "inherit": {"variables": False},
@@ -657,20 +693,18 @@ def prepare(
                 }
             ],
             "script": [
-                f"python3 .wheel-triage/wheel_failure_triage.py audit {REPORT_PATH}"
+                f"python3 {shlex.quote(cli_path)} audit {shlex.quote(report_path)}"
             ],
             "artifacts": {
-                "paths": [REPORT_PATH],
+                "paths": [report_path],
                 "when": "always",
                 "expire_in": "7 days",
             },
         },
     }
     cli_source: Path = Path(__file__).with_name("wheel_failure_triage.py")
-    shutil.copyfile(cli_source, work_dir.joinpath("wheel_failure_triage.py"))
-    work_dir.joinpath("audit.yml").write_text(
-        yaml.safe_dump(config, sort_keys=False), encoding="utf-8"
-    )
+    shutil.copyfile(cli_source, cli_file)
+    config_file.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
     print(f"Collected {len(failures)} failures into one audit report")
 
 

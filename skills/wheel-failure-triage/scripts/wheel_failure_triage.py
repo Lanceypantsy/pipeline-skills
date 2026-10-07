@@ -25,7 +25,7 @@ def main() -> int:
     )
     notify.add_argument("--work-dir", type=Path, default=Path(".wheel-triage"))
     audit: argparse.ArgumentParser = commands.add_parser(
-        "audit", help="Print all failures and fail when the report is nonempty"
+        "audit", help="Print failure counts and fail when the report is nonempty"
     )
     audit.add_argument("evidence", type=Path)
     args: argparse.Namespace = parser.parse_args()
@@ -33,16 +33,17 @@ def main() -> int:
     if args.command == "audit":
         data: dict[str, Any] = json.loads(args.evidence.read_text(encoding="utf-8"))
         failures: list[dict[str, Any]] = data["failures"]
-        print(f"Source pipeline: {data['pipeline_url']}")
         print(f"Failure occurrences: {len(failures)}")
-        print("Complete report is retained as the failures.json artifact for PFA.")
+        counts: dict[str, int] = dict.fromkeys(("wheel", "job", "evidence", "other"), 0)
         for failure in failures:
-            entry: dict[str, Any] = {
-                key: value
-                for key, value in failure.items()
-                if key not in {"diagnostics", "producer_diagnostics"}
-            }
-            print("ERROR: wheel failure " + json.dumps(entry))
+            kind: Any = failure.get("kind") if isinstance(failure, dict) else None
+            bucket: str = kind if isinstance(kind, str) and kind in counts else "other"
+            counts[bucket] += 1
+        print(
+            "Failure kinds: "
+            + ", ".join(f"{kind}={count}" for kind, count in counts.items())
+        )
+        print("Complete report is retained as the failures.json artifact for PFA.")
         return int(bool(failures))
 
     core: ModuleType = importlib.import_module(
