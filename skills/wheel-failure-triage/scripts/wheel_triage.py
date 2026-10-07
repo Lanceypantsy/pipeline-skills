@@ -713,7 +713,7 @@ def notify(client: GitLab, environ: dict[str, str], work_dir: Path) -> None:
     prefix: str = "Nightly" if nightly else "Post-Merge Failure"
     variables: dict[str, str] = {
         "PIPELINE_URL": pipeline_url,
-        "JIRA_PROJECT": environ.get("JIRA_PROJECT", "RHAI"),
+        "JIRA_PROJECT": environ.get("JIRA_PROJECT") or "RHAI",
         "JIRA_LABELS": environ.get(
             "JIRA_LABELS", "nightly-pipeline" if nightly else "builder-pipeline"
         ),
@@ -722,15 +722,14 @@ def notify(client: GitLab, environ: dict[str, str], work_dir: Path) -> None:
             "JIRA_SUMMARY_PREFIX", f"[{prefix}] - {environ['CI_COMMIT_REF_NAME']}"
         ),
         "NOTIFY_ON_SUCCESS": "true" if clean else "false",
-        "SLACK_WEBHOOK_URL": environ.get("SLACK_WEBHOOK_URL", ""),
         "DATADOG_CONFIG": environ.get(
             "DATADOG_CONFIG", "datadog:\n  tags:\n    service: aipcc-fondue\n"
         ),
     }
-    if (
-        environ.get("PFA_DISABLE_NOTIFICATIONS") == "true"
-        or environ.get("JIRA_API_TOKEN") == ""
-    ):
+    webhook: str = environ.get("SLACK_WEBHOOK_URL", "").strip()
+    if webhook:
+        variables["SLACK_WEBHOOK_URL"] = webhook
+    if environ.get("PFA_DISABLE_NOTIFICATIONS") == "true":
         variables.update(JIRA_API_TOKEN="", SLACK_WEBHOOK_URL="")
     response: requests.Response = client.session.post(
         f"{client.api_url}/projects/{quote(PFA_PROJECT, safe='')}/pipeline",
