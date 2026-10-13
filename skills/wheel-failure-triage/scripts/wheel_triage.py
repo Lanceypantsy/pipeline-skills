@@ -744,6 +744,11 @@ def notify(client: GitLab, environ: dict[str, str], work_dir: Path) -> None:
     clean: bool
     pipeline_url, clean = wait_for_audit(client, environ)
     nightly: bool = environ.get("CI_PIPELINE_SOURCE") == "schedule"
+    if clean and not nightly:
+        # Only nightlies report success. A clean post-merge audit found no failed
+        # jobs and no partial failures, so there is nothing for PFA to analyze.
+        print("Audit is clean; PFA not started for this post-merge pipeline")
+        return
     prefix: str = "Nightly" if nightly else "Post-Merge Failure"
     variables: dict[str, str] = {
         "PIPELINE_URL": pipeline_url,
