@@ -40,7 +40,7 @@ After the audit bridge reaches a terminal state, the CI notification job invokes
 python3 "${CLAUDE_SKILL_DIR}/scripts/wheel_failure_triage.py" notify --work-dir .wheel-triage
 ```
 
-The CLI starts the PFA pipeline using `BOT_PAT` and forwards the selected pipeline URL. Jira defaults to the `RHAI` project. Notifications are enabled by default: PFA uses its own `JIRA_API_TOKEN` and configured Slack webhook. A nonempty caller `SLACK_WEBHOOK_URL` overrides that destination; an unset or empty value leaves PFA's default intact. Only explicit `PFA_DISABLE_NOTIFICATIONS=true` suppresses Jira and Slack by sending empty downstream credentials.
+The CLI starts the PFA pipeline using `BOT_PAT` and forwards the selected pipeline URL. Outside scheduled pipelines, a clean audit (no failed jobs and no partial failures) starts no PFA pipeline, so callers can run the flow on every post-merge pipeline and analyze only those with failures. Jira defaults to the `RHAI` project. Notifications are enabled by default: PFA uses its own `JIRA_API_TOKEN` and configured Slack webhook. A nonempty caller `SLACK_WEBHOOK_URL` overrides that destination; an unset or empty value leaves PFA's default intact. Only explicit `PFA_DISABLE_NOTIFICATIONS=true` suppresses Jira and Slack by sending empty downstream credentials.
 
 ## Runtime requirements
 
