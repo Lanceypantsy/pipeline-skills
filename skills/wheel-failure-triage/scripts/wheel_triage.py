@@ -709,9 +709,13 @@ def prepare(
 
 
 def wait_for_audit(
-    client: GitLab, environ: dict[str, str], timeout: float = 1200
+    client: GitLab, environ: dict[str, str], timeout: float = 2400
 ) -> tuple[str, bool]:
-    """Wait outside the child so PFA receives its completed failure report."""
+    """Wait outside the child so PFA receives its completed failure report.
+
+    Without a completed report, analyze the parent pipeline so its failures are
+    still reported.
+    """
     deadline: float = time.monotonic() + timeout
     while time.monotonic() < deadline:
         bridges: list[dict[str, Any]] = client.list(
@@ -728,15 +732,17 @@ def wait_for_audit(
             pipeline: dict[str, Any] = client.get(f"pipelines/{child['id']}").json()
             if pipeline["status"] in TERMINAL:
                 if pipeline["status"] not in {"success", "failed"}:
-                    raise ValueError(
-                        f"Audit child did not complete: {pipeline['status']}"
+                    print(
+                        f"Audit child {pipeline['status']}; analyzing the parent pipeline"
                     )
+                    return environ["CI_PIPELINE_URL"], False
                 return pipeline["web_url"], pipeline["status"] == "success"
         elif bridge["status"] in {"failed", "canceled", "skipped"}:
             # Collection or child creation failed: analyze the parent instead.
             return environ["CI_PIPELINE_URL"], False
         time.sleep(10)
-    raise TimeoutError("Timed out waiting for the audit child")
+    print("Timed out waiting for the audit child; analyzing the parent pipeline")
+    return environ["CI_PIPELINE_URL"], False
 
 
 def notify(client: GitLab, environ: dict[str, str], work_dir: Path) -> None:
